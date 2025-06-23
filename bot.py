@@ -306,6 +306,8 @@ async def generate_alldebrid_link(url):
         logger.error(f"AllDebrid failed for {url}: {str(e)}")
         return None, False
 
+
+
 async def generate_download_link(url):
     # First try AllDebrid
     download_link, is_ad_link = await generate_alldebrid_link(url)
@@ -321,9 +323,10 @@ async def generate_download_link(url):
     nginx_server = "http://45.126.127.67"  # Replace with your NGINX server IP
     parsed_link = urlparse(download_link)
     if "debrid.it" in parsed_link.netloc.lower() and parsed_link.path.startswith("/dl/"):
-        # Extract the path after /dl/ (e.g., 3tcld0f2a10/DXBB-008.avi)
+        # Extract subdomain (e.g., df4ea4) and path after /dl/ (e.g., 3tcld0f2a10/DXBB-008.avi)
+        subdomain = parsed_link.netloc.split('.')[0]  # Get subdomain (e.g., df4ea4)
         relative_path = parsed_link.path[4:]  # Remove "/dl/"
-        nginx_link = f"{nginx_server}/download/{relative_path}"
+        nginx_link = f"{nginx_server}/download/{subdomain}/{relative_path}"
         logger.info(f"Rewrote AllDebrid link {download_link} to {nginx_link}")
         return nginx_link, is_ad_link
     
@@ -331,6 +334,9 @@ async def generate_download_link(url):
     logger.warning(f"Link {download_link} not rewritten, not an AllDebrid dl link")
     return download_link, is_ad_link
 
+
+    
+ 
 # Check Leech Limits
 async def check_unsubscribed_limit(user_id, subscription, subscription_expires=None):
     now = datetime.datetime.utcnow()
