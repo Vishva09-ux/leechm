@@ -367,10 +367,10 @@ async def check_unsubscribed_limit(user_id, subscription, subscription_expires=N
     
     if subscription_status == 0:
         if leech_count_today >= 2:
-            return False, "⛔ **Daily Limit Reached** ⛔\n\nYou've hit your 2-leech limit for today."
+            return False, "⛔ **Daily Limit Reached** ⛔\n\nYou've hit your 2-leech limit for today.\n\n🌟 **Go Premium!** 🌟\n\n🔹 **Benefits**:\n- Unlimited link generations\n- Faster processing\n\n💸 **Price**: ₹300 or $5/month\n📩 Contact [Admin](https://t.me/Pianokdt) to subscribe!"
     elif is_trial:
         if leech_count_today >= 5:
-            return False, "⛔ **Trial Limit Reached** ⛔\n\nYou've hit your 5-leech limit for today."
+            return False, "⛔ **Trial Limit Reached** ⛔\n\nYou've hit your 5-leech limit for today.\n\n🌟 **Go Premium!** 🌟\n\n🔹 **Benefits**:\n- Unlimited link generations\n- Faster processing\n\n💸 **Price**: ₹300 or $5/month\n📩 Contact [Admin](https://t.me/Pianokdt) to subscribe!"
     return True, ""
 
 
@@ -565,7 +565,6 @@ async def start(client, message):
 
     reply_markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("📋 My Plan", callback_data="myplan")],
-        [InlineKeyboardButton("🎉 1 Day Trial", callback_data="trial")],
         [InlineKeyboardButton("💎 Upgrade", callback_data="upgrade")],
         [InlineKeyboardButton("🔗 Referral", callback_data="referral")]
     ])
