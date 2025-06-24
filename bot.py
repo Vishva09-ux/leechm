@@ -104,7 +104,7 @@ SUPPORTED_HOSTS = [
     "turbobit.net", "ubiqfile.com", "uloz.to", "uploadboy.com", "uploadgig.com",
     "upstore.net", "vipfile.cc", "world-files.com", "wupfile.com", "xfights.to",
     "xubster.com", "terabox.com", "mega.nz", "dropgalaxy.com", "file-upload.com",
-    "file-upload.org"
+    "file-upload.org", "dgdrive.site"
 ]
 
 VALID_TERABOX_DOMAINS = [
