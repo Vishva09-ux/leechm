@@ -606,7 +606,6 @@ async def start(client, message):
     referral_link = f"https://t.me/{bot_username}?start={user_id}"
     reply_markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("📋 My Plan", callback_data="myplan")],
-        [InlineKeyboardButton("🎉 1 Day Trial", callback_data="trial")],
         [InlineKeyboardButton("💎 Upgrade", callback_data="upgrade")],
         [InlineKeyboardButton("🔗 Referral", callback_data="referral")]
     ])
@@ -871,36 +870,6 @@ async def myplan_command(client, message):
     )
     await message.reply(reply_text, disable_web_page_preview=True)
 
-# Trial Command
-@app.on_message(filters.command("trial") & filters.private)
-async def trial_command(client, message):
-    user_id = message.from_user.id
-    result = await db_fetchone("SELECT trial_claimed FROM users WHERE user_id = %s", (user_id,))
-    if not result:
-        await message.reply("🌟 Please use /start first!")
-        return
-    if result[0]:
-        await message.reply("❌ You've already claimed your trial!")
-        return
-    expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=1)
-    await db_execute(
-        "UPDATE users SET subscription = 1, subscription_expires = %s, trial_claimed = TRUE WHERE user_id = %s",
-        (expires_at, user_id)
-    )
-    await message.reply("🎉 **24-Hour Trial Activated!** Enjoy premium features!")
-    await client.send_message(ADMIN_ID, f"🔔 **Trial Activated**\nUser ID: {user_id}\nExpires: {expires_at}")
-
-# Upgrade Command
-@app.on_message(filters.command("upgrade") & filters.private)
-async def upgrade_command(client, message):
-    await message.reply(
-        "🌟 **Go Premium!** 🌟\n\n"
-        "🔹 **Benefits**:\n"
-        "  - Unlimited link generations\n"
-        "  - Faster processing\n\n"
-        "💸 **Price**: ₹300 or $5/month\n"
-        "📩 Contact [Admin](https://t.me/Pianokdt) to subscribe!"
-    )
 
 # Referral Command
 @app.on_message(filters.command("referral") & filters.private)
