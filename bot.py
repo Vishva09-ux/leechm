@@ -333,7 +333,7 @@ async def generate_download_link(url):
     
     # Return original link if not an AllDebrid link
     logger.warning(f"Link {download_link} not rewritten, not an AllDebrid dl link")
-    return download_link, is_ad_linkot3.py
+    return download_link, is_ad_link
 
 
 # Check Leech Limits
