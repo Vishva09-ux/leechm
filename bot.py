@@ -763,7 +763,7 @@ async def supported_hosts_command(client, message):
             chunk = reply_text_base + "```\n" + chunk_table + "\n```" + (note if i + 10 >= len(table_rows) else "")
             await message.reply(chunk, reply_markup=reply_markup if i == 0 else None, parse_mode="Markdown", disable_web_page_preview=True)
     else:
-        await message.reply(full_text, reply_markup=reply_markup, parse_mode="Markdown", disable_web_page_preview=True)
+        await message.reply(full_text, reply_markup=reply_markup, parse_mode="markdown", disable_web_page_preview=True)
 
 
 
