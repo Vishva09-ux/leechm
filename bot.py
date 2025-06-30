@@ -841,7 +841,7 @@ async def set_subscription_period(client, callback_query):
 @app.on_message(filters.command("ru") & filters.user(ADMIN_ID))
 async def remove_user(client, message):
     try:
-        user_id = int message.text.split()[1])
+        user_id = int (message.text.split()[1])
         await db_execute("UPDATE users SET subscription = 0 WHERE user_id = %s", (user_id,))
         await message.reply(f"✅ User ID **{user_id}** subscription deactivated!")
     except Exception as e:
