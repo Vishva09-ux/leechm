@@ -388,6 +388,23 @@ async def handle_session_or_link(client: Client, message: Message):
                            "💸 **Price**: ₹300 or $5/month\n"
                            "📩 Contact [Admin](https://t.me/Pianokdt) to subscribe!")
         return
+
+
+    # Check if user is premium
+    is_premium = subscription == 1 and subscription_expires and now < subscription_expires
+    if not is_premium:
+        await message.reply(
+            "🔒 **Premium Only Service** 🔒\n\n"
+            "Link generation is now exclusive to premium members.\n"
+            "💎 **Upgrade Now** for unlimited link generations and faster processing!\n"
+            "💸 **Price**: ₹300 or $5/month\n"
+            "📩 Use `/upgrade` or contact [Admin](https://t.me/Pianokdt) to subscribe!"
+        )
+        return
+
+
+
+    
     links = re.findall(r'https?://\S+', message.text)
     if not links:
         await message.reply("❌ **No URLs Found** ❌\n\nPlease send a valid URL!")
@@ -499,6 +516,36 @@ async def leech_command(client, message):
     if subscription == 1 and subscription_expires and now > subscription_expires:
         await db_execute("UPDATE users SET subscription = 0, subscription_expires = NULL WHERE user_id = %s", (user_id,))
         subscription = 0
+
+    # Check if user exists and is not blocked
+    result = await db_fetchone("SELECT blocked, subscription, subscription_expires FROM users WHERE user_id = %s", (user_id,))
+    if not result:
+        await message.reply("🌟 **Start First!** 🌟\n\nUse `/start` to begin!")
+        return
+    blocked, subscription, subscription_expires = result
+    if blocked:
+        await message.reply("🌟 **Go Premium!** 🌟\n\n"
+                           "🔹 **Benefits**:\n"
+                           "  - Unlimited link generations\n"
+                           "  - Faster processing\n\n"
+                           "💸 **Price**: ₹300 or $5/month\n"
+                           "📩 Contact [Admin](https://t.me/Pianokdt) to subscribe!")
+        return
+
+    # Check if user is premium
+    now = datetime.datetime.utcnow()
+    is_premium = subscription == 1 and subscription_expires and now < subscription_expires
+    if not is_premium:
+        await message.reply(
+            "🔒 **Premium Only Service** 🔒\n\n"
+            "Link generation is now exclusive to premium members.\n"
+            "💎 **Upgrade Now** for unlimited link generations and faster processing!\n"
+            "💸 **Price**: ₹300 or $5/month\n"
+            "📩 Use `/upgrade` or contact [Admin](https://t.me/Pianokdt) to subscribe!"
+        )
+        return
+
+    
     for url in urls:
         parsed_url = urlparse(url)
         host = parsed_url.netloc.lower().replace("www.", "")
@@ -652,19 +699,13 @@ async def handle_button_callback(client, callback_query):
         subscription, subscription_expires, trial_claimed, referral_count = result
         now = datetime.datetime.utcnow()
         if subscription == 1 and subscription_expires and now < subscription_expires:
-            time_remaining = (subscription_expires - now).total_seconds() / 3600
-            if time_remaining > 24:
-                plan_status = "💎 **Premium**"
-                expiry_text = f"⏰ **Expires**: {subscription_expires.strftime('%Y-%m-%d %H:%M:%S UTC')}"
-                leech_limit = "Unlimited"
-            else:
-                plan_status = "💎 **Trial**"
-                expiry_text = f"⏰ **Trial Ends**: {subscription_expires.strftime('%Y-%m-%d %H:%M:%S UTC')}"
-                leech_limit = "5"
+            plan_status = "💎 **Premium**"
+            expiry_text = f"⏰ **Expires**: {subscription_expires.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+            leech_limit = "Unlimited"
         else:
             plan_status = "🆓 **Free**"
             expiry_text = "⏰ **No active subscription**"
-            leech_limit = "2"
+            leech_limit = "Not available (Premium only)"
         trial_text = "✅ **Available**" if not trial_claimed else "❌ **Used**"
         leech_result = await db_fetchone(
             "SELECT leech_count FROM leech_counts WHERE user_id = %s AND date = %s",
@@ -680,9 +721,10 @@ async def handle_button_callback(client, callback_query):
             f"🌟 **Trial Status**: {trial_text}\n"
             f"{leech_usage}\n"
             f"{referral_text}\n\n"
-            f"💎 Use /upgrade for unlimited links!"
+            f"💎 Link generation is a premium-only feature. Use /upgrade to subscribe!"
         )
         await callback_query.message.reply(reply_text, disable_web_page_preview=True)
+        
     elif command == "upgrade":
         await callback_query.message.reply(
             "🌟 **Go Premium!** 🌟\n\n"
@@ -825,6 +867,7 @@ async def supported_hosts_command(client, message):
     )
 
 # My Plan Command
+# My Plan Command
 @app.on_message(filters.command("myplan") & filters.private)
 async def myplan_command(client, message):
     user_id = message.from_user.id
@@ -838,19 +881,13 @@ async def myplan_command(client, message):
     subscription, subscription_expires, trial_claimed, referral_count = result
     now = datetime.datetime.utcnow()
     if subscription == 1 and subscription_expires and now < subscription_expires:
-        time_remaining = (subscription_expires - now).total_seconds() / 3600
-        if time_remaining > 24:
-            plan_status = "💎 **Premium**"
-            expiry_text = f"⏰ **Expires**: {subscription_expires.strftime('%Y-%m-%d %H:%M:%S UTC')}"
-            leech_limit = "Unlimited"
-        else:
-            plan_status = "💎 **Trial**"
-            expiry_text = f"⏰ **Trial Ends**: {subscription_expires.strftime('%Y-%m-%d %H:%M:%S UTC')}"
-            leech_limit = "5"
+        plan_status = "💎 **Premium**"
+        expiry_text = f"⏰ **Expires**: {subscription_expires.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        leech_limit = "Unlimited"
     else:
         plan_status = "🆓 **Free**"
         expiry_text = "⏰ **No active subscription**"
-        leech_limit = "2"
+        leech_limit = "Not available (Premium only)"
     trial_text = "✅ **Available**" if not trial_claimed else "❌ **Used**"
     leech_result = await db_fetchone(
         "SELECT leech_count FROM leech_counts WHERE user_id = %s AND date = %s",
@@ -866,27 +903,9 @@ async def myplan_command(client, message):
         f"🌟 **Trial Status**: {trial_text}\n"
         f"{leech_usage}\n"
         f"{referral_text}\n\n"
-        f"💎 Use /upgrade for unlimited links!"
+        f"💎 Link generation is a premium-only feature. Use /upgrade to subscribe!"
     )
     await message.reply(reply_text, disable_web_page_preview=True)
-
-
-# Referral Command
-@app.on_message(filters.command("referral") & filters.private)
-async def referral_command(client, message):
-    user_id = message.from_user.id
-    result = await db_fetchone("SELECT referral_count FROM users WHERE user_id = %s", (user_id,))
-    if not result:
-        await message.reply("🌟 Please use /start first!")
-        return
-    referral_count = result[0]
-    bot_username = (await app.get_me()).username
-    referral_link = f"https://t.me/{bot_username}?start={user_id}"
-    await message.reply(
-        f"🔗 **Your Referral Link**: `{referral_link}`\n\n"
-        f"📊 **Referrals**: {referral_count}\n"
-        "🎁 **Reward**: 30 days premium per 50 referrals!"
-    )
 
 # Admin Commands
 @app.on_message(filters.command("block") & filters.user(ADMIN_ID))
