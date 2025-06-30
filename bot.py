@@ -739,20 +739,7 @@ async def supported_hosts_command(client, message):
     await message.reply(
         "📋 **Supported File-Hosting Sites** 📋\n\n"
         "You can use '/leech `URL`' to download files from these platforms:\n\n"
-        "Alfafile        BRupload       BrFiles        Clicknupload\n    
-        Daofile         DropAPK        Elitefile      Emload\n         
-        Ex-load         Fastbit        Fastfile       Fboom.me\n       
-        Fikper          File.AL        Filedot        Fileaxa\n       
-        Filefox         Filejoker      Filenext       Filesfly\n       
-        Filesmonster    Filespace      Flashbit       Gigapeta\n       
-        Hitfile         Hotlink.cc     Icerbox        IsraCloud\n      
-        Jumploads       Kshared        Katfile        Keep2share\n     
-        Metadoll        Mexashare      Nelion         Nitroflare\n         
-        Prefiles        RapidCloud.cc  RapidRAR       Rapidgator\n
-        Silkfiles       Subyshare      TakeFile       Tezfiles\n      
-        Turbobit        Ubiqfile       Uloz           UploadBoy\n      
-        UploadGig       Upstore        Vipfile        World-files\n"    
-        Wupfile         Xubster        dropgalaxy     file-upload.org`\n\n"
+        "Alfafile        BRupload       BrFiles        Clicknupload\nDaofile         DropAPK        Elitefile      Emload\nEx-load         Fastbit        Fastfile       Fboom.me\nFikper          File.AL        Filedot        Fileaxa\nFilefox         Filejoker      Filenext       Filesfly\nFilesmonster    Filespace      Flashbit       Gigapeta\nHitfile         Hotlink.cc     Icerbox        IsraCloud\nJumploads       Kshared        Katfile        Keep2share\nMetadoll        Mexashare      Nelion         Nitroflare\nPrefiles        RapidCloud.cc  RapidRAR       Rapidgator\nSilkfiles       Subyshare      TakeFile       Tezfiles\nTurbobit        Ubiqfile       Uloz           UploadBoy\nUploadGig       Upstore        Vipfile        World-files\nWupfile         Xubster        dropgalaxy     file-upload.org`\n\n"
         "🔹 **Note**: Limits apply based on your plan (see /myplan).\n"
         "🔹 **Help**: Use /help for more details on leeching."
     )
