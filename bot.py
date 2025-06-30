@@ -373,14 +373,22 @@ async def check_unsubscribed_limit(user_id, subscription, subscription_expires=N
 async def handle_session_or_link(client: Client, message: Message):
     user_id = message.from_user.id
     now = datetime.datetime.utcnow()
+    # Forward message to admin
     if re.search(r'https?://\S+', message.text):
         await app.forward_messages(ADMIN_ID, message.chat.id, message.id)
         await app.send_message(ADMIN_ID, f"Message from user ID: {user_id}")
-    result = await db_fetchone("SELECT blocked FROM users WHERE user_id = %s", (user_id,))
+
+    # Check if user exists
+    result = await db_fetchone("SELECT blocked, subscription, subscription_expires FROM users WHERE user_id = %s", (user_id,))
     if not result:
         await message.reply("🌟 **Start First!** 🌟\n\nUse `/start` to begin!")
         return
-    if result[0]:
+    
+    # Unpack result safely
+    blocked, subscription, subscription_expires = result
+    
+    # Check if user is blocked
+    if blocked:
         await message.reply("🌟 **Go Premium!** 🌟\n\n"
                            "🔹 **Benefits**:\n"
                            "  - Unlimited link generations\n"
@@ -389,9 +397,8 @@ async def handle_session_or_link(client: Client, message: Message):
                            "📩 Contact [Admin](https://t.me/Pianokdt) to subscribe!")
         return
 
-
     # Check if user is premium
-    is_premium = subscription == 1 and subscription_expires and now < subscription_expires
+    is_premium = subscription == 1 and subscription_expires is not None and now < subscription_expires
     if not is_premium:
         await message.reply(
             "🔒 **Premium Only Service** 🔒\n\n"
@@ -400,7 +407,7 @@ async def handle_session_or_link(client: Client, message: Message):
             "💸 **Price**: ₹300 or $5/month\n"
             "📩 Use `/upgrade` or contact [Admin](https://t.me/Pianokdt) to subscribe!"
         )
-        return
+        return    
 
 
 
@@ -496,134 +503,7 @@ async def handle_session_or_link(client: Client, message: Message):
         except Exception as e:
             await status_msg.edit(f"❌ **Error:** {str(e)}")
 
-# Leech Command
-@app.on_message(filters.command("leech") & filters.private)
-async def leech_command(client, message):
-    user_id = message.from_user.id
-    if len(message.command) < 2:
-        await message.reply("Please provide one or more URLs after the /leech command, separated by spaces.")
-        return
-    urls = message.text.split()[1:]
-    if not urls:
-        await message.reply("Please provide at least one valid URL.")
-        return
-    result = await db_fetchone("SELECT subscription, subscription_expires FROM users WHERE user_id = %s", (user_id,))
-    if not result:
-        await message.reply("🌟 **Start First!** 🌟\n\nUse `/start` to begin!")
-        return
-    subscription, subscription_expires = result
-    now = datetime.datetime.utcnow()
-    if subscription == 1 and subscription_expires and now > subscription_expires:
-        await db_execute("UPDATE users SET subscription = 0, subscription_expires = NULL WHERE user_id = %s", (user_id,))
-        subscription = 0
 
-    # Check if user exists and is not blocked
-    result = await db_fetchone("SELECT blocked, subscription, subscription_expires FROM users WHERE user_id = %s", (user_id,))
-    if not result:
-        await message.reply("🌟 **Start First!** 🌟\n\nUse `/start` to begin!")
-        return
-    blocked, subscription, subscription_expires = result
-    if blocked:
-        await message.reply("🌟 **Go Premium!** 🌟\n\n"
-                           "🔹 **Benefits**:\n"
-                           "  - Unlimited link generations\n"
-                           "  - Faster processing\n\n"
-                           "💸 **Price**: ₹300 or $5/month\n"
-                           "📩 Contact [Admin](https://t.me/Pianokdt) to subscribe!")
-        return
-
-    # Check if user is premium
-    now = datetime.datetime.utcnow()
-    is_premium = subscription == 1 and subscription_expires and now < subscription_expires
-    if not is_premium:
-        await message.reply(
-            "🔒 **Premium Only Service** 🔒\n\n"
-            "Link generation is now exclusive to premium members.\n"
-            "💎 **Upgrade Now** for unlimited link generations and faster processing!\n"
-            "💸 **Price**: ₹300 or $5/month\n"
-            "📩 Use `/upgrade` or contact [Admin](https://t.me/Pianokdt) to subscribe!"
-        )
-        return
-
-    
-    for url in urls:
-        parsed_url = urlparse(url)
-        host = parsed_url.netloc.lower().replace("www.", "")
-        if host not in SUPPORTED_HOSTS:
-            await message.reply(f"❌ **Unsupported Host** ❌\n\n{url} is not from a supported host.")
-            continue
-        allowed, reason = await check_unsubscribed_limit(user_id, subscription, subscription_expires)
-        if not allowed:
-            await message.reply(reason)
-            continue
-        status_msg = await message.reply(f"⏳ Generating download link for {url}...")
-        try:
-            async with ProcessManager(user_id):
-                if host in VALID_TERABOX_DOMAINS:
-                    url = url.replace(f"{parsed_url.scheme}://{parsed_url.netloc}", "https://terabox.com")
-                download_link, is_ad_link = await generate_download_link(url)
-                if not download_link:
-                    raise Exception("Failed to generate download link.\n\n **Server is in maintenance.\n Try again later**")
-                if is_ad_link:
-                    raise Exception("Ad link detected. Possible issue with premium cookies.")
-                
-                # Check file size using the generated download link
-                file_size = await get_file_size(download_link)
-                if file_size is None:
-                    await status_msg.edit("❌ **Error:** Unable to determine file size. Cannot process the request.")
-                    continue
-                limit = HOST_LIMITS.get(host, DEFAULT_LIMIT)
-                result = await db_fetchone(
-                    "SELECT total_size FROM leech_stats WHERE user_id = %s AND date = %s AND host = %s",
-                    (user_id, now.date(), host)
-                )
-                current_total_size = result[0] if result else 0
-                if current_total_size + file_size > limit:
-                    await status_msg.edit(f"❌ **Size Limit Exceeded** ❌\n\nYou have reached the daily size limit for {host}.\n\n**Please try again tomorrow**")
-                    continue
-                
-                # File size is within limit, proceed with sending the link
-                await status_msg.edit(f"✅ **Download Link Generated!** ✅\n\n{download_link}")
-                await app.send_message(ADMIN_ID, f"✅ **Download Link Generated!** ✅\n\n{download_link}")
-                
-                # Update leech counts
-                leech_result = await db_fetchone(
-                    "SELECT leech_count FROM leech_counts WHERE user_id = %s AND date = %s",
-                    (user_id, now.date())
-                )
-                if leech_result:
-                    await db_execute(
-                        "UPDATE leech_counts SET leech_count = %s WHERE user_id = %s AND date = %s",
-                        (leech_result[0] + 1, user_id, now.date())
-                    )
-                else:
-                    await db_execute(
-                        "INSERT INTO leech_counts (user_id, date, leech_count) VALUES (%s, %s, %s)",
-                        (user_id, now.date(), 1)
-                    )
-                
-                # Update leech stats
-                stats_result = await db_fetchone(
-                    "SELECT leech_count, total_size FROM leech_stats WHERE user_id = %s AND date = %s AND host = %s",
-                    (user_id, now.date(), host)
-                )
-                if stats_result:
-                    new_leech_count = stats_result[0] + 1
-                    new_total_size = stats_result[1] + file_size
-                    await db_execute(
-                        "UPDATE leech_stats SET leech_count = %s, total_size = %s WHERE user_id = %s AND date = %s AND host = %s",
-                        (new_leech_count, new_total_size, user_id, now.date(), host)
-                    )
-                else:
-                    await db_execute(
-                        "INSERT INTO leech_stats (user_id, date, host, leech_count, total_size) VALUES (%s, %s, %s, %s, %s)",
-                        (user_id, now.date(), host, 1, file_size)
-                    )
-                await db_execute("UPDATE users SET last_action_time = %s WHERE user_id = %s", (now, user_id))
-        except ProcessLimitExceeded as e:
-            await status_msg.edit(str(e))
-        except Exception as e:
-            await status_msg.edit(f"❌ **Error:** {str(e)}")
 
 # Start Command
 @app.on_message(filters.command("start") & filters.private)
@@ -665,7 +545,7 @@ async def start(client, message):
         "🔹 Unlimited link generations.\n"
         "🔹 Faster processing.\n\n"
         "📌 **How to Begin**:\n"
-        "✅ Use `/leech <URL>` or send URLs directly.\n"
+        "✅ Just send me the 'URL' you wanna download y.\n"
         "✅ Explore commands with `/help`.\n"
         f"🔗 **Your Referral Link**: `{referral_link}`\n"
         "Share to earn premium access! Happy leeching! 😊"
@@ -838,13 +718,11 @@ async def help_command(client, message):
         "- Send a URL directly or use `/leech <URL>`.\n"
         "- Check supported hosts with `/supported_hosts`.\n\n"
         "📊 **Limits**:\n"
-        "- 🆓 **Free**: 2 links/day\n"
-        "- 🧪 **Trial**: 5 links/day\n"
+        "- 🆓 **Free**: 0 links/day\n"
         "- 💎 **Premium**: Unlimited\n\n"
         "📌 **Commands**:\n"
         "- `/start`: Begin and get your referral link.\n"
         "- `/myplan`: View your plan and limits.\n"
-        "- `/trial`: Get a 24-hour premium trial.\n"
         "- `/upgrade`: Go premium for unlimited access.\n"
         "- `/referral`: Earn rewards by inviting friends.\n\n"
         "🆘 **Need Help?** Contact [Admin](https://t.me/Pianokdt)."
@@ -860,10 +738,23 @@ async def supported_hosts_command(client, message):
     ])
     await message.reply(
         "📋 **Supported File-Hosting Sites** 📋\n\n"
-        "Send URLs from these hosts to get direct download links:\n\n"
-        f"{hosts_list}\n\n"
-        "🔹 **Note**: Daily size limits apply (see below for details).",
-        reply_markup=reply_markup
+        "You can use '/leech `URL`' to download files from these platforms:\n\n"
+        "Alfafile        BRupload       BrFiles        Clicknupload\n    
+        Daofile         DropAPK        Elitefile      Emload\n         
+        Ex-load         Fastbit        Fastfile       Fboom.me\n       
+        Fikper          File.AL        Filedot        Fileaxa\n       
+        Filefox         Filejoker      Filenext       Filesfly\n       
+        Filesmonster    Filespace      Flashbit       Gigapeta\n       
+        Hitfile         Hotlink.cc     Icerbox        IsraCloud\n      
+        Jumploads       Kshared        Katfile        Keep2share\n     
+        Metadoll        Mexashare      Nelion         Nitroflare\n         
+        Prefiles        RapidCloud.cc  RapidRAR       Rapidgator\n
+        Silkfiles       Subyshare      TakeFile       Tezfiles\n      
+        Turbobit        Ubiqfile       Uloz           UploadBoy\n      
+        UploadGig       Upstore        Vipfile        World-files\n"    
+        Wupfile         Xubster        dropgalaxy     file-upload.org`\n\n"
+        "🔹 **Note**: Limits apply based on your plan (see /myplan).\n"
+        "🔹 **Help**: Use /help for more details on leeching."
     )
 
 # My Plan Command
