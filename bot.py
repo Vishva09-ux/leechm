@@ -564,7 +564,7 @@ async def start(client, message):
         await message.reply(f"❌ Error: {str(e)}\nPlease try again or contact [Admin](https://t.me/Pianokdt).")
 
 # Callback Query Handlers
-@app.on_callback_query(filters.regex(r"^(myplan|upgrade|referral|trial|check_host_status)$"))
+@app.on_callback_query(filters.regex(r"^(myplan|upgrade|referral|trial)$"))
 async def handle_button_callback(client, callback_query):
     user_id = callback_query.from_user.id
     command = callback_query.data
@@ -642,43 +642,59 @@ async def handle_button_callback(client, callback_query):
         )
         await callback_query.message.reply("🎉 **24-Hour Trial Activated!** Enjoy premium features!")
         await client.send_message(ADMIN_ID, f"🔔 **Trial Activated**\nUser ID: {user_id}\nExpires: {expires_at}")
-    elif command == "check_host_status":
+  
+      
+
+@app.on_callback_query(filters.regex(r"^(check_host_status(:[0-9]+)?)$"))
+async def handle_button_callback(client, callback_query):
+    user_id = callback_query.from_user.id
+    command = callback_query.data.split(":")[0]  # Extract base command
+    page = int(callback_query.data.split(":")[1]) if ":" in callback_query.data and callback_query.data.split(":")[1].isdigit() else 1
+
+    if command == "check_host_status":
+        logger.info(f"Processing check_host_status callback for user {user_id}, page {page}")
         now = datetime.datetime.utcnow().date()
         used_sizes = {}
-        result = await db_fetchall(
-            "SELECT host, total_size FROM leech_stats WHERE user_id = %s AND date = %s",
-            (user_id, now)
-        )
-        for row in result:
-            used_sizes[row[0]] = row[1]
+        try:
+            result = await db_fetchall(
+                "SELECT host, total_size FROM leech_stats WHERE user_id = %s AND date = %s",
+                (user_id, now)
+            )
+            for row in result:
+                used_sizes[row[0]] = row[1]
+        except Exception as e:
+            logger.error(f"Database error: {e}")
+            await callback_query.message.reply("Error fetching host status.")
+            await callback_query.answer("Error occurred.")
+            return
+
         TELEGRAM_MAX_MESSAGE_LENGTH = 4096
         hosts_data = []
         for host in sorted(SUPPORTED_HOSTS):
             limit = HOST_LIMITS.get(host, DEFAULT_LIMIT)
             used = used_sizes.get(host, 0)
-            remaining = max(limit - used, 0)
             limit_gb = limit / (1024**3)
             used_gb = used / (1024**3)
-            remaining_gb = remaining / (1024**3)
-            hosts_data.append((host, used_gb, limit_gb, remaining_gb))
-    
+            hosts_data.append((host, used_gb, limit_gb))
+
         # Pagination
         items_per_page = 10
         total_pages = (len(hosts_data) + items_per_page - 1) // items_per_page
-        page = int(callback_query.data.split(":")[1]) if ":" in callback_query.data and callback_query.data.split(":")[1].isdigit() else 1
+        if page < 1 or page > total_pages:
+            page = 1  # Reset to first page if invalid
         start_idx = (page - 1) * items_per_page
         end_idx = min(start_idx + items_per_page, len(hosts_data))
         current_data = hosts_data[start_idx:end_idx]
-    
+
         # Build the message
         header = "🌐 **Daily Host Status** 🌐\n\nSend URLs from these hosts to check usage:\n\n"
-        table_header = "```| Host            | Used (GB) | Limit (GB) | Remaining (GB) |\n|-----------------|-----------|------------|----------------|\n"
+        table_header = "```| Host    | Used(GB) | Limit(GB) |\n|---------|------|-------|\n"
         table_rows = []
-        for host, used_gb, limit_gb, remaining_gb in current_data:
-            table_rows.append(f"| {host:<15} | {used_gb:>9.2f} | {limit_gb:>10.2f} | {remaining_gb:>14.2f} |")
+        for host, used_gb, limit_gb in current_data:
+            table_rows.append(f"| {host} | {used_gb:.2f} | {limit_gb:.2f} |")
         table_content = table_header + "\n".join(table_rows) + "\n```"
         footer = "\n🔹 **Note**: Values are approximate and updated daily."
-    
+
         # Create navigation buttons
         reply_markup = InlineKeyboardMarkup([
             [
@@ -687,17 +703,32 @@ async def handle_button_callback(client, callback_query):
                 InlineKeyboardButton("Next ➡️", callback_data=f"check_host_status:{page + 1}" if page < total_pages else "ignore")
             ]
         ])
-    
+
         # Send or edit the message
         full_text = header + table_content + footer
         if len(full_text) > TELEGRAM_MAX_MESSAGE_LENGTH:
             full_text = full_text[:TELEGRAM_MAX_MESSAGE_LENGTH - 100] + "\n... (Message truncated)"
-        if callback_query.message.reply_markup:
-            await callback_query.message.edit_text(full_text, reply_markup=reply_markup, disable_web_page_preview=True)
-        else:
-            await callback_query.message.reply(full_text, reply_markup=reply_markup, disable_web_page_preview=True)
+        try:
+            if callback_query.message.reply_markup:
+                await callback_query.message.edit_text(full_text, reply_markup=reply_markup, disable_web_page_preview=True)
+            else:
+                await callback_query.message.reply(full_text, reply_markup=reply_markup, disable_web_page_preview=True)
+        except Exception as e:
+            logger.error(f"Error sending message: {e}")
+            await callback_query.message.reply("Error updating host status.")
+            await callback_query.answer("Error occurred.")
+            return
         await callback_query.answer(f"Showing page {page} of {total_pages}")
-      
+    else:
+        await callback_query.answer()
+
+
+
+
+
+
+
+
 
 # Referral Rewards Check
 async def check_referral_rewards(user_id):
