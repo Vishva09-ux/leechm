@@ -110,7 +110,7 @@ def init_db():
         cursor.execute('''CREATE TABLE IF NOT EXISTS users 
                           (user_id BIGINT PRIMARY KEY, subscription INTEGER DEFAULT 0, 
                            blocked BOOLEAN DEFAULT FALSE, last_action_time TIMESTAMP,
-                           trial_claimed BOOLEAN DEFAULT FALSE, subscription_expires TIMESTAMP,
+                           lifetime_leech_used BOOLEAN DEFAULT FALSE, subscription_expires TIMESTAMP,
                            referred_by BIGINT, referral_count INTEGER DEFAULT 0,
                            referral_rewards_claimed INTEGER DEFAULT 0)''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS leech_counts 
@@ -194,11 +194,9 @@ class ProcessManager:
         if active_processes[self.user_id] == 0:
             del active_processes[self.user_id]
 
-
 # File Size Retrieval using HTTP Request
 async def get_file_size(download_link):
     try:
-        # First try a HEAD request to get Content-Length
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
         }
@@ -207,7 +205,6 @@ async def get_file_size(download_link):
             size = int(response.headers['Content-Length'])
             logger.info(f"File size retrieved via HEAD request for {download_link}: {size} bytes")
             return size
-        # Fallback to GET request with stream=True if HEAD fails
         response = requests.get(download_link, headers=headers, stream=True, timeout=30)
         response.raise_for_status()
         size = response.headers.get('Content-Length')
@@ -220,8 +217,6 @@ async def get_file_size(download_link):
     except Exception as e:
         logger.error(f"Failed to get file size for {download_link}: {str(e)}")
         return None
-
-
 
 # Juba-Get Link Generator
 async def generate_juba_get_link(url):
@@ -307,65 +302,40 @@ async def generate_alldebrid_link(url):
         logger.error(f"AllDebrid failed for {url}: {str(e)}")
         return None, False
 
-
-
 async def generate_download_link(url):
-    # First try AllDebrid
     download_link, is_ad_link = await generate_alldebrid_link(url)
-    
-    # If AllDebrid fails, fall back to Juba-Get
     if not download_link:
         download_link, is_ad_link = await generate_juba_get_link(url)
-    
     if not download_link:
         return None, False
-    
-    # Rewrite AllDebrid link to NGINX proxy link
-    nginx_server = "http://45.126.127.67"  # Replace with your NGINX server IP
+    nginx_server = "http://45.126.127.67"
     parsed_link = urlparse(download_link)
     if "debrid.it" in parsed_link.netloc.lower() and parsed_link.path.startswith("/dl/"):
-        # Extract subdomain (e.g., df4ea4) and path after /dl/ (e.g., 3tcld0f2a10/DXBB-008.avi)
-        subdomain = parsed_link.netloc.split('.')[0]  # Get subdomain (e.g., df4ea4)
-        relative_path = parsed_link.path[4:]  # Remove "/dl/"
+        subdomain = parsed_link.netloc.split('.')[0]
+        relative_path = parsed_link.path[4:]
         nginx_link = f"{nginx_server}/download/{subdomain}/{relative_path}"
         logger.info(f"Rewrote AllDebrid link {download_link} to {nginx_link}")
         return nginx_link, is_ad_link
-    
-    # Return original link if not an AllDebrid link
     logger.warning(f"Link {download_link} not rewritten, not an AllDebrid dl link")
     return download_link, is_ad_link
-
 
 # Check Leech Limits
 async def check_unsubscribed_limit(user_id, subscription, subscription_expires=None):
     now = datetime.datetime.utcnow()
     result = await db_fetchone(
-        "SELECT subscription, subscription_expires FROM users WHERE user_id = %s",
+        "SELECT subscription, subscription_expires, lifetime_leech_used FROM users WHERE user_id = %s",
         (user_id,)
     )
     if not result:
         return False, "User not found. Use /start first!"
-    subscription_status, expires_at = result
+    subscription_status, expires_at, lifetime_leech_used = result
     if subscription_status == 1 and expires_at and now > expires_at:
         await db_execute("UPDATE users SET subscription = 0, subscription_expires = NULL WHERE user_id = %s", (user_id,))
         subscription_status = 0
-    is_trial = False
-    if subscription_status == 1 and expires_at:
-        time_remaining = (expires_at - now).total_seconds() / 3600
-        if time_remaining > 24:
-            return True, ""
-        is_trial = time_remaining <= 24
-    leech_result = await db_fetchone(
-        "SELECT leech_count FROM leech_counts WHERE user_id = %s AND date = %s",
-        (user_id, now.date())
-    )
-    leech_count_today = leech_result[0] if leech_result else 0
-    if subscription_status == 0:
-        if leech_count_today >= 2:
-            return False, "⛔ **Daily Limit Reached** ⛔\n\nYou've hit your 2-leech limit for today."
-    elif is_trial:
-        if leech_count_today >= 5:
-            return False, "⛔ **Trial Limit Reached** ⛔\n\nYou've hit your 5-leech limit for today."
+    if subscription_status == 1:
+        return True, ""
+    if lifetime_leech_used:
+        return False, "⛔ **Lifetime Limit Reached** ⛔\n\nYou've used your one-time free leech. Upgrade to premium for unlimited leeches!"
     return True, ""
 
 # Handle URLs in Messages
@@ -373,21 +343,14 @@ async def check_unsubscribed_limit(user_id, subscription, subscription_expires=N
 async def handle_session_or_link(client: Client, message: Message):
     user_id = message.from_user.id
     now = datetime.datetime.utcnow()
-    # Forward message to admin
     if re.search(r'https?://\S+', message.text):
         await app.forward_messages(ADMIN_ID, message.chat.id, message.id)
         await app.send_message(ADMIN_ID, f"Message from user ID: {user_id}")
-
-    # Check if user exists
-    result = await db_fetchone("SELECT blocked, subscription, subscription_expires FROM users WHERE user_id = %s", (user_id,))
+    result = await db_fetchone("SELECT blocked, subscription, subscription_expires, lifetime_leech_used FROM users WHERE user_id = %s", (user_id,))
     if not result:
         await message.reply("🌟 **Start First!** 🌟\n\nUse `/start` to begin!")
         return
-    
-    # Unpack result safely
-    blocked, subscription, subscription_expires = result
-    
-    # Check if user is blocked
+    blocked, subscription, subscription_expires, lifetime_leech_used = result
     if blocked:
         await message.reply("🌟 **Go Premium!** 🌟\n\n"
                            "🔹 **Benefits**:\n"
@@ -396,22 +359,16 @@ async def handle_session_or_link(client: Client, message: Message):
                            "💸 **Price**: ₹300 or $5/month\n"
                            "📩 Contact [Admin](https://t.me/Pianokdt) to subscribe!")
         return
-
-    # Check if user is premium
     is_premium = subscription == 1 and subscription_expires is not None and now < subscription_expires
-    if not is_premium:
+    if not is_premium and lifetime_leech_used:
         await message.reply(
             "🔒 **Premium Only Service** 🔒\n\n"
-            "Link generation is now exclusive to premium members.\n"
+            "You've used your one-time free leech.\n"
             "💎 **Upgrade Now** for unlimited link generations and faster processing!\n"
             "💸 **Price**: ₹300 or $5/month\n"
             "📩 Use `/upgrade` or contact [Admin](https://t.me/Pianokdt) to subscribe!"
         )
-        return    
-
-
-
-    
+        return
     links = re.findall(r'https?://\S+', message.text)
     if not links:
         await message.reply("❌ **No URLs Found** ❌\n\nPlease send a valid URL!")
@@ -444,8 +401,6 @@ async def handle_session_or_link(client: Client, message: Message):
                     raise Exception("Failed to generate download link.\n\n **Server is in maintenance.\n Try again later**")
                 if is_ad_link:
                     raise Exception("Ad link detected. Possible issue with premium cookies.")
-                
-                # Check file size using the generated download link
                 file_size = await get_file_size(download_link)
                 if file_size is None:
                     await status_msg.edit("❌ **Error:** Unable to determine file size. Cannot process the request.")
@@ -459,12 +414,13 @@ async def handle_session_or_link(client: Client, message: Message):
                 if current_total_size + file_size > limit:
                     await status_msg.edit(f"❌ **Size Limit Exceeded** ❌\n\nYou have reached the daily bandwidth limit for {host}.\n\n**Please try again tomorrow**")
                     continue
-                
-                # File size is within limit, proceed with sending the link
                 await status_msg.edit(f"✅ **Download Link Generated!** ✅\n\n{download_link}")
                 await app.send_message(ADMIN_ID, f"✅ **Download Link Generated!** ✅\n\n{download_link}")
-                
-                # Update leech counts
+                if subscription == 0:
+                    await db_execute(
+                        "UPDATE users SET lifetime_leech_used = TRUE WHERE user_id = %s",
+                        (user_id,)
+                    )
                 leech_result = await db_fetchone(
                     "SELECT leech_count FROM leech_counts WHERE user_id = %s AND date = %s",
                     (user_id, now.date())
@@ -479,8 +435,6 @@ async def handle_session_or_link(client: Client, message: Message):
                         "INSERT INTO leech_counts (user_id, date, leech_count) VALUES (%s, %s, %s)",
                         (user_id, now.date(), 1)
                     )
-                
-                # Update leech stats
                 stats_result = await db_fetchone(
                     "SELECT leech_count, total_size FROM leech_stats WHERE user_id = %s AND date = %s AND host = %s",
                     (user_id, now.date(), host)
@@ -503,8 +457,6 @@ async def handle_session_or_link(client: Client, message: Message):
         except Exception as e:
             await status_msg.edit(f"❌ **Error:** {str(e)}")
 
-
-
 # Start Command
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
@@ -518,7 +470,7 @@ async def start(client, message):
     result = await db_fetchone("SELECT subscription, referred_by FROM users WHERE user_id = %s", (user_id,))
     if not result:
         referred_by = referral_id if referral_id and referral_id != user_id else None
-        await db_execute("INSERT INTO users (user_id, referred_by) VALUES (%s, %s)", (user_id, referred_by))
+        await db_execute("INSERT INTO users (user_id, referred_by, lifetime_leech_used) VALUES (%s, %s, %s)", (user_id, referred_by, False))
         if referred_by:
             await db_execute("UPDATE users SET referral_count = referral_count + 1 WHERE user_id = %s", (referred_by,))
             await check_referral_rewards(referred_by)
@@ -545,7 +497,7 @@ async def start(client, message):
         "🔹 Unlimited link generations.\n"
         "🔹 Faster processing.\n\n"
         "📌 **How to Begin**:\n"
-        "✅ Just send me the 'URL' you wanna download .\n"
+        "✅ Just send me a 'URL' to use your one-time free leech.\n"
         "✅ Explore commands with `/help`.\n"
         f"🔗 **Your Referral Link**: `{referral_link}`\n"
         "Share to earn premium access! Happy leeching! 😊"
@@ -564,19 +516,19 @@ async def start(client, message):
         await message.reply(f"❌ Error: {str(e)}\nPlease try again or contact [Admin](https://t.me/Pianokdt).")
 
 # Callback Query Handlers
-@app.on_callback_query(filters.regex(r"^(myplan|upgrade|referral|trial)$"))
+@app.on_callback_query(filters.regex(r"^(myplan|upgrade|referral)$"))
 async def handle_button_callback(client, callback_query):
     user_id = callback_query.from_user.id
     command = callback_query.data
     if command == "myplan":
         result = await db_fetchone(
-            "SELECT subscription, subscription_expires, trial_claimed, referral_count FROM users WHERE user_id = %s",
+            "SELECT subscription, subscription_expires, lifetime_leech_used, referral_count FROM users WHERE user_id = %s",
             (user_id,)
         )
         if not result:
             await callback_query.message.reply("🌟 Please use /start to register!")
             return
-        subscription, subscription_expires, trial_claimed, referral_count = result
+        subscription, subscription_expires, lifetime_leech_used, referral_count = result
         now = datetime.datetime.utcnow()
         if subscription == 1 and subscription_expires and now < subscription_expires:
             plan_status = "💎 **Premium**"
@@ -585,8 +537,8 @@ async def handle_button_callback(client, callback_query):
         else:
             plan_status = "🆓 **Free**"
             expiry_text = "⏰ **No active subscription**"
-            leech_limit = "Not available (Premium only)"
-        trial_text = "✅ **Available**" if not trial_claimed else "❌ **Used**"
+            leech_limit = "1/month"
+        leech_text = "✅ **Available**" if not lifetime_leech_used else "❌ **Used**"
         leech_result = await db_fetchone(
             "SELECT leech_count FROM leech_counts WHERE user_id = %s AND date = %s",
             (user_id, now.date())
@@ -598,13 +550,12 @@ async def handle_button_callback(client, callback_query):
             f"📋 **Your Plan** 📋\n\n"
             f"**Status**: {plan_status}\n"
             f"{expiry_text}\n"
-            f"🌟 **Trial Status**: {trial_text}\n"
+            f"🌟 **Free Leech Status**: {leech_text}\n"
             f"{leech_usage}\n"
             f"{referral_text}\n\n"
-            f"💎 Link generation is a premium-only feature. Use /upgrade to subscribe!"
+            f"💎 Upgrade to premium for unlimited leeches!"
         )
         await callback_query.message.reply(reply_text, disable_web_page_preview=True)
-        
     elif command == "upgrade":
         await callback_query.message.reply(
             "🌟 **Go Premium!** 🌟\n\n"
@@ -627,30 +578,12 @@ async def handle_button_callback(client, callback_query):
             f"📊 **Referrals**: {referral_count}\n"
             "🎁 **Reward**: 30 days premium per 50 referrals!"
         )
-    elif command == "trial":
-        result = await db_fetchone("SELECT trial_claimed FROM users WHERE user_id = %s", (user_id,))
-        if not result:
-            await callback_query.message.reply("🌟 Please use /start first!")
-            return
-        if result[0]:
-            await callback_query.message.reply("❌ You've already claimed your trial!")
-            return
-        expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=1)
-        await db_execute(
-            "UPDATE users SET subscription = 1, subscription_expires = %s, trial_claimed = TRUE WHERE user_id = %s",
-            (expires_at, user_id)
-        )
-        await callback_query.message.reply("🎉 **24-Hour Trial Activated!** Enjoy premium features!")
-        await client.send_message(ADMIN_ID, f"🔔 **Trial Activated**\nUser ID: {user_id}\nExpires: {expires_at}")
-  
-      
 
 @app.on_callback_query(filters.regex(r"^(check_host_status(:[0-9]+)?)$"))
 async def handle_button_callback(client, callback_query):
     user_id = callback_query.from_user.id
-    command = callback_query.data.split(":")[0]  # Extract base command
+    command = callback_query.data.split(":")[0]
     page = int(callback_query.data.split(":")[1]) if ":" in callback_query.data and callback_query.data.split(":")[1].isdigit() else 1
-
     if command == "check_host_status":
         logger.info(f"Processing check_host_status callback for user {user_id}, page {page}")
         now = datetime.datetime.utcnow().date()
@@ -667,7 +600,6 @@ async def handle_button_callback(client, callback_query):
             await callback_query.message.reply("Error fetching host status.")
             await callback_query.answer("Error occurred.")
             return
-
         TELEGRAM_MAX_MESSAGE_LENGTH = 4096
         hosts_data = []
         for host in sorted(SUPPORTED_HOSTS):
@@ -676,17 +608,13 @@ async def handle_button_callback(client, callback_query):
             limit_gb = limit / (1024**3)
             used_gb = used / (1024**3)
             hosts_data.append((host, used_gb, limit_gb))
-
-        # Pagination
         items_per_page = 10
         total_pages = (len(hosts_data) + items_per_page - 1) // items_per_page
         if page < 1 or page > total_pages:
-            page = 1  # Reset to first page if invalid
+            page = 1
         start_idx = (page - 1) * items_per_page
         end_idx = min(start_idx + items_per_page, len(hosts_data))
         current_data = hosts_data[start_idx:end_idx]
-
-        # Build the message
         header = "🌐 **Daily Host Status** 🌐\n\nSend URLs from these hosts to check usage:\n\n"
         table_header = "```| Host    | Used(GB) | Limit(GB) |\n|---------|------|-------|\n"
         table_rows = []
@@ -694,8 +622,6 @@ async def handle_button_callback(client, callback_query):
             table_rows.append(f"| {host} | {used_gb:.2f} | {limit_gb:.2f} |")
         table_content = table_header + "\n".join(table_rows) + "\n```"
         footer = "\n🔹 **Note**: Values are approximate and updated daily."
-
-        # Create navigation buttons
         reply_markup = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("⬅️ Previous", callback_data=f"check_host_status:{page - 1}" if page > 1 else "ignore"),
@@ -703,8 +629,6 @@ async def handle_button_callback(client, callback_query):
                 InlineKeyboardButton("Next ➡️", callback_data=f"check_host_status:{page + 1}" if page < total_pages else "ignore")
             ]
         ])
-
-        # Send or edit the message
         full_text = header + table_content + footer
         if len(full_text) > TELEGRAM_MAX_MESSAGE_LENGTH:
             full_text = full_text[:TELEGRAM_MAX_MESSAGE_LENGTH - 100] + "\n... (Message truncated)"
@@ -721,14 +645,6 @@ async def handle_button_callback(client, callback_query):
         await callback_query.answer(f"Showing page {page} of {total_pages}")
     else:
         await callback_query.answer()
-
-
-
-
-
-
-
-
 
 # Referral Rewards Check
 async def check_referral_rewards(user_id):
@@ -772,7 +688,7 @@ async def help_command(client, message):
         "- Send a URL directly or use `/leech <URL>`.\n"
         "- Check supported hosts with `/supported_hosts`.\n\n"
         "📊 **Limits**:\n"
-        "- 🆓 **Free**: 0 links/day\n"
+        "- 🆓 **Free**: 1 leech/month \n"
         "- 💎 **Premium**: Unlimited\n\n"
         "📌 **Commands**:\n"
         "- `/start`: Begin and get your referral link.\n"
@@ -786,56 +702,42 @@ async def help_command(client, message):
 # Supported Hosts Command
 @app.on_message(filters.command("supported_hosts") & filters.private)
 async def supported_hosts_command(client, message):
-    # Split SUPPORTED_HOSTS into chunks for 3 columns
     num_columns = 3
     num_hosts = len(SUPPORTED_HOSTS)
-    hosts_per_column = (num_hosts + num_columns - 1) // num_columns  # Ceiling division
+    hosts_per_column = (num_hosts + num_columns - 1) // num_columns
     columns = [SUPPORTED_HOSTS[i:i + hosts_per_column] for i in range(0, num_hosts, hosts_per_column)]
-
-    # Create table rows
     table_rows = []
     for i in range(max(len(col) for col in columns)):
         row = "| "
         for col in columns:
             row += f"{col[i] if i < len(col) else ''} | "
         table_rows.append(row.strip())
-
-    # Join rows into a table
     hosts_table = "\n".join(table_rows) if table_rows else "No hosts available."
-
-    # Create the reply message with a code block using plain text
     reply_text_base = "📋 **Supported File-Hosting Sites** 📋\n\nSend URLs from these hosts to get direct download links:\n\n"
     note = "\n\n🔹 **Note**: Daily size limits apply (see below for details)."
     reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("📊 Check Host Status", callback_data="check_host_status")]])
-
-    # Combine into full text with code block
     full_text = reply_text_base + "```\n" + hosts_table + "\n```" + note
-
-    # Split into multiple messages if too long
     if len(full_text) > 4096:
-        chunk_size = 3500  # Arbitrary size to stay under 4096 limit
-        for i in range(0, len(table_rows), 10):  # Split every 10 rows
+        chunk_size = 3500
+        for i in range(0, len(table_rows), 10):
             chunk_table = "\n".join(table_rows[i:i + 10])
             chunk = reply_text_base + "```\n" + chunk_table + "\n```" + (note if i + 10 >= len(table_rows) else "")
             await message.reply(chunk, reply_markup=reply_markup if i == 0 else None, disable_web_page_preview=True)
     else:
         await message.reply(full_text, reply_markup=reply_markup, disable_web_page_preview=True)
 
-
-
-# My Plan Command
 # My Plan Command
 @app.on_message(filters.command("myplan") & filters.private)
 async def myplan_command(client, message):
     user_id = message.from_user.id
     result = await db_fetchone(
-        "SELECT subscription, subscription_expires, trial_claimed, referral_count FROM users WHERE user_id = %s",
+        "SELECT subscription, subscription_expires, lifetime_leech_used, referral_count FROM users WHERE user_id = %s",
         (user_id,)
     )
     if not result:
         await message.reply("🌟 Please use /start to register!")
         return
-    subscription, subscription_expires, trial_claimed, referral_count = result
+    subscription, subscription_expires, lifetime_leech_used, referral_count = result
     now = datetime.datetime.utcnow()
     if subscription == 1 and subscription_expires and now < subscription_expires:
         plan_status = "💎 **Premium**"
@@ -844,8 +746,8 @@ async def myplan_command(client, message):
     else:
         plan_status = "🆓 **Free**"
         expiry_text = "⏰ **No active subscription**"
-        leech_limit = "Not available (Premium only)"
-    trial_text = "✅ **Available**" if not trial_claimed else "❌ **Used**"
+        leech_limit = "1 (Lifetime)"
+    leech_text = "✅ **Available**" if not lifetime_leech_used else "❌ **Used**"
     leech_result = await db_fetchone(
         "SELECT leech_count FROM leech_counts WHERE user_id = %s AND date = %s",
         (user_id, now.date())
@@ -857,10 +759,10 @@ async def myplan_command(client, message):
         f"📋 **Your Plan** 📋\n\n"
         f"**Status**: {plan_status}\n"
         f"{expiry_text}\n"
-        f"🌟 **Trial Status**: {trial_text}\n"
+        f"🌟 **Free Leech Status**: {leech_text}\n"
         f"{leech_usage}\n"
         f"{referral_text}\n\n"
-        f"💎 Link generation is a premium-only feature. Use /upgrade to subscribe!"
+        f"💎 Upgrade to premium for unlimited leeches!"
     )
     await message.reply(reply_text, disable_web_page_preview=True)
 
@@ -912,7 +814,7 @@ async def add_user_start(client, message):
         target_user_id = int(message.command[1])
         result = await db_fetchone("SELECT subscription FROM users WHERE user_id = %s", (target_user_id,))
         if not result:
-            await db_execute("INSERT INTO users (user_id, subscription) VALUES (%s, 0)", (target_user_id,))
+            await db_execute("INSERT INTO users (user_id, subscription, lifetime_leech_used) VALUES (%s, 0, %s)", (target_user_id, False))
         reply_markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("7 Days", callback_data=f"sub_{target_user_id}_7")],
             [InlineKeyboardButton("15 Days", callback_data=f"sub_{target_user_id}_15")],
@@ -939,7 +841,7 @@ async def set_subscription_period(client, callback_query):
 @app.on_message(filters.command("ru") & filters.user(ADMIN_ID))
 async def remove_user(client, message):
     try:
-        user_id = int(message.text.split()[1])
+        user_id = int message.text.split()[1])
         await db_execute("UPDATE users SET subscription = 0 WHERE user_id = %s", (user_id,))
         await message.reply(f"✅ User ID **{user_id}** subscription deactivated!")
     except Exception as e:
