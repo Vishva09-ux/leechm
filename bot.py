@@ -735,7 +735,7 @@ async def supported_hosts_command(client, message):
     # Split SUPPORTED_HOSTS into chunks for 3 columns
     num_columns = 3
     num_hosts = len(SUPPORTED_HOSTS)
-    hosts_per_column = (num_hosts + num_columns - 1) // num_columns
+    hosts_per_column = (num_hosts + num_columns - 1) // num_columns  # Ceiling division
     columns = [SUPPORTED_HOSTS[i:i + hosts_per_column] for i in range(0, num_hosts, hosts_per_column)]
 
     # Create table rows
@@ -749,21 +749,23 @@ async def supported_hosts_command(client, message):
     # Join rows into a table
     hosts_table = "\n".join(table_rows) if table_rows else "No hosts available."
 
-    # Create the reply message with a code block for the table
+    # Create the reply message with a code block using plain text
     reply_text_base = "📋 **Supported File-Hosting Sites** 📋\n\nSend URLs from these hosts to get direct download links:\n\n"
     note = "\n\n🔹 **Note**: Daily size limits apply (see below for details)."
     reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("📊 Check Host Status", callback_data="check_host_status")]])
 
-    # Split into multiple messages if too long
+    # Combine into full text with code block
     full_text = reply_text_base + "```\n" + hosts_table + "\n```" + note
+
+    # Split into multiple messages if too long
     if len(full_text) > 4096:
         chunk_size = 3500  # Arbitrary size to stay under 4096 limit
         for i in range(0, len(table_rows), 10):  # Split every 10 rows
             chunk_table = "\n".join(table_rows[i:i + 10])
             chunk = reply_text_base + "```\n" + chunk_table + "\n```" + (note if i + 10 >= len(table_rows) else "")
-            await message.reply(chunk, reply_markup=reply_markup if i == 0 else None, parse_mode="Markdown", disable_web_page_preview=True)
+            await message.reply(chunk, reply_markup=reply_markup if i == 0 else None, disable_web_page_preview=True)
     else:
-        await message.reply(full_text, reply_markup=reply_markup, parse_mode="html", disable_web_page_preview=True)
+        await message.reply(full_text, reply_markup=reply_markup, disable_web_page_preview=True)
 
 
 
