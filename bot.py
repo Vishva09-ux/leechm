@@ -652,9 +652,7 @@ async def handle_button_callback(client, callback_query):
         for row in result:
             used_sizes[row[0]] = row[1]
         TELEGRAM_MAX_MESSAGE_LENGTH = 4096
-        message_parts = []
-        current_part = ["🌐 **Daily Host Status** 🌐\n"]
-        current_length = len(current_part[0])
+        hosts_data = []
         for host in sorted(SUPPORTED_HOSTS):
             limit = HOST_LIMITS.get(host, DEFAULT_LIMIT)
             used = used_sizes.get(host, 0)
@@ -662,19 +660,44 @@ async def handle_button_callback(client, callback_query):
             limit_gb = limit / (1024**3)
             used_gb = used / (1024**3)
             remaining_gb = remaining / (1024**3)
-            line = f"🔹 `{host}` - Used: {used_gb:.2f} GB / {limit_gb:.2f} GB ({remaining_gb:.2f} GB left)\n"
-            if current_length + len(line) > TELEGRAM_MAX_MESSAGE_LENGTH - 100:
-                message_parts.append("\n".join(current_part))
-                current_part = ["🌐 **Daily Host Status (Continued)** 🌐\n"]
-                current_length = len(current_part[0])
-            current_part.append(line)
-            current_length += len(line)
-        if len(current_part) > 1:
-            message_parts.append("\n".join(current_part))
-        for part in message_parts:
-            await callback_query.message.reply(part)
-        await callback_query.answer("Host status displayed!")
-    await callback_query.answer()
+            hosts_data.append((host, used_gb, limit_gb, remaining_gb))
+    
+        # Pagination
+        items_per_page = 10
+        total_pages = (len(hosts_data) + items_per_page - 1) // items_per_page
+        page = int(callback_query.data.split(":")[1]) if ":" in callback_query.data and callback_query.data.split(":")[1].isdigit() else 1
+        start_idx = (page - 1) * items_per_page
+        end_idx = min(start_idx + items_per_page, len(hosts_data))
+        current_data = hosts_data[start_idx:end_idx]
+    
+        # Build the message
+        header = "🌐 **Daily Host Status** 🌐\n\nSend URLs from these hosts to check usage:\n\n"
+        table_header = "```| Host            | Used (GB) | Limit (GB) | Remaining (GB) |\n|-----------------|-----------|------------|----------------|\n"
+        table_rows = []
+        for host, used_gb, limit_gb, remaining_gb in current_data:
+            table_rows.append(f"| {host:<15} | {used_gb:>9.2f} | {limit_gb:>10.2f} | {remaining_gb:>14.2f} |")
+        table_content = table_header + "\n".join(table_rows) + "\n```"
+        footer = "\n🔹 **Note**: Values are approximate and updated daily."
+    
+        # Create navigation buttons
+        reply_markup = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("⬅️ Previous", callback_data=f"check_host_status:{page - 1}" if page > 1 else "ignore"),
+                InlineKeyboardButton(f"Page {page}/{total_pages}", callback_data="ignore"),
+                InlineKeyboardButton("Next ➡️", callback_data=f"check_host_status:{page + 1}" if page < total_pages else "ignore")
+            ]
+        ])
+    
+        # Send or edit the message
+        full_text = header + table_content + footer
+        if len(full_text) > TELEGRAM_MAX_MESSAGE_LENGTH:
+            full_text = full_text[:TELEGRAM_MAX_MESSAGE_LENGTH - 100] + "\n... (Message truncated)"
+        if callback_query.message.reply_markup:
+            await callback_query.message.edit_text(full_text, reply_markup=reply_markup, disable_web_page_preview=True)
+        else:
+            await callback_query.message.reply(full_text, reply_markup=reply_markup, disable_web_page_preview=True)
+        await callback_query.answer(f"Showing page {page} of {total_pages}")
+      
 
 # Referral Rewards Check
 async def check_referral_rewards(user_id):
