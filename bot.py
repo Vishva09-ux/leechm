@@ -732,17 +732,33 @@ async def help_command(client, message):
 # Supported Hosts Command
 @app.on_message(filters.command("supported_hosts") & filters.private)
 async def supported_hosts_command(client, message):
-    hosts_list = "\n".join([f"🔗 `{host}`" for host in SUPPORTED_HOSTS])
-    reply_markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 Check Host Status", callback_data="check_host_status")]
-    ])
-    await message.reply(
-        "📋 **Supported File-Hosting Sites** 📋\n\n"
-        "You can use '/leech `URL`' to download files from these platforms:\n\n"
-        "Alfafile        BRupload       BrFiles        Clicknupload\nDaofile         DropAPK        Elitefile      Emload\nEx-load         Fastbit        Fastfile       Fboom.me\nFikper          File.AL        Filedot        Fileaxa\nFilefox         Filejoker      Filenext       Filesfly\nFilesmonster    Filespace      Flashbit       Gigapeta\nHitfile         Hotlink.cc     Icerbox        IsraCloud\nJumploads       Kshared        Katfile        Keep2share\nMetadoll        Mexashare      Nelion         Nitroflare\nPrefiles        RapidCloud.cc  RapidRAR       Rapidgator\nSilkfiles       Subyshare      TakeFile       Tezfiles\nTurbobit        Ubiqfile       Uloz           UploadBoy\nUploadGig       Upstore        Vipfile        World-files\nWupfile         Xubster        dropgalaxy     file-upload.org`\n\n"
-        "🔹 **Note**: Limits apply based on your plan (see /myplan).\n"
-        "🔹 **Help**: Use /help for more details on leeching."
-    )
+    num_columns = 3
+    num_hosts = len(SUPPORTED_HOSTS)
+    hosts_per_column = (num_hosts + num_columns - 1) // num_columns
+    columns = [SUPPORTED_HOSTS[i:i + hosts_per_column] for i in range(0, num_hosts, hosts_per_column)]
+
+    table_rows = []
+    for i in range(max(len(col) for col in columns)):
+        row = "| "
+        for col in columns:
+            row += f"`{col[i] if i < len(col) else ''}` | "
+        table_rows.append(row.strip())
+
+    # Split into multiple messages if too long
+    chunk_size = 3500  # Arbitrary size to stay under 4096 limit
+    reply_text_base = "📋 **Supported File-Hosting Sites** 📋\n\nSend URLs from these hosts to get direct download links:\n\n"
+    note = "\n\n🔹 **Note**: Daily size limits apply (see below for details)."
+    reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("📊 Check Host Status", callback_data="check_host_status")]])
+
+    full_text = reply_text_base + "\n".join(table_rows) + note
+    if len(full_text) > 4096:
+        for i in range(0, len(table_rows), 10):  # Split every 10 rows
+            chunk = reply_text_base + "\n".join(table_rows[i:i + 10]) + (note if i + 10 >= len(table_rows) else "")
+            await message.reply(chunk, reply_markup=reply_markup if i == 0 else None, disable_web_page_preview=True)
+    else:
+        await message.reply(full_text, reply_markup=reply_markup, disable_web_page_preview=True)
+
+
 
 # My Plan Command
 # My Plan Command
