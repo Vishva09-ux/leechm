@@ -545,7 +545,7 @@ async def start(client, message):
         "🔹 Unlimited link generations.\n"
         "🔹 Faster processing.\n\n"
         "📌 **How to Begin**:\n"
-        "✅ Just send me the 'URL' you wanna download y.\n"
+        "✅ Just send me the 'URL' you wanna download .\n"
         "✅ Explore commands with `/help`.\n"
         f"🔗 **Your Referral Link**: `{referral_link}`\n"
         "Share to earn premium access! Happy leeching! 😊"
