@@ -119,6 +119,8 @@ def init_db():
         cursor.execute('''CREATE TABLE IF NOT EXISTS leech_stats 
                           (user_id BIGINT, date DATE, host TEXT, leech_count INTEGER DEFAULT 0, 
                            total_size BIGINT DEFAULT 0, PRIMARY KEY (user_id, date, host))''')
+        cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS lifetime_leech_used BOOLEAN DEFAULT FALSE")
+
         conn.commit()
     except Exception as e:
         logger.error(f"Database initialization error: {str(e)}")
